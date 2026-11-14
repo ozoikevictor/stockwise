@@ -2,11 +2,15 @@
 
 The cloud service serves the online dashboard and Express API from the same HTTPS address. PostgreSQL stores shared shop records. Desktop SQLite data is unchanged. Offline sales synchronization is still a separate phase.
 
+## Free testing limitations
+
+Render free PostgreSQL expires 30 days after creation and has no backups. Free web services sleep after 15 minutes without requests and may take about a minute to wake. Only one free PostgreSQL database is allowed per workspace. If Blueprint setup requests a payment method, use manual New > Postgres (Free), then New > Web Service (Docker, Free). Set DATABASE_URL using the database internal connection string, HOST=0.0.0.0, and TRUST_PROXY=1 in the service environment. Never send database credentials in chat. Do not choose a paid plan or add a card to continue this testing workflow.
+
 ## Deploy
 
 1. Push this project root to a private Git repository. Exclude .env files, local-postgres, node_modules, SQLite files, build-cache and upgrade-checkpoints. The root .gitignore and .dockerignore exclude these.
 2. In Render, connect that repository through New > Blueprint and select render.yaml.
-3. Review the displayed costs before creating resources. The blueprint selects a paid single-instance web service and PostgreSQL database. No hosting has been purchased or created by these files.
+3. Review the displayed costs before creating resources. The blueprint selects a free web service and free PostgreSQL database for temporary testing. Free PostgreSQL expires after 30 days; free web services sleep when idle. Use test data only. No hosting has been purchased or created by these files.
 4. Deploy. The Docker build creates the browser app; startup runs the idempotent schema migration then the backend. The database URL is injected server-side. The Render external URL is used for same-origin browser requests.
 5. Open the service URL followed by /api/health and confirm ok is true. Open /online on your phone to sign in.
 6. In desktop StockWise, log out, open Online server settings on the online sign-in page, paste the HTTPS service address without /api or /online, and choose Save and test connection. Repeat on each computer.
