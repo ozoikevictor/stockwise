@@ -1,3 +1,4 @@
+import {AuthProgress,waitForAuthPaint} from "@/components/shop/AuthProgress";
 import { onlineStore, useOnlineStore } from "@/lib/store";
 import type { OnlineSession } from "@/lib/online-sync-core";
 import { OnlineShell } from "@/components/shop/OnlineShell";
@@ -50,6 +51,7 @@ function Online() {
     await onlineStore.sync();
   }
   const [signup, setSignup] = useState(false);
+  const [authLoading,setAuthLoading]=useState(false);
   const [busy, setBusy] = useState(false);
   const [tab, setTab] = useState("dashboard");
   const [selected, setSelected] = useState("");
@@ -96,7 +98,7 @@ function Online() {
     void onlineStore.restore();
   }, []);
   useEffect(() => {
-    if (!session || switching || reauth) return;
+    if (!session || switching || reauth || authLoading) return;
     const run = () => {
       void onlineStore.sync();
     };
@@ -109,7 +111,7 @@ function Online() {
       window.removeEventListener("online", run);
       window.removeEventListener("offline", onlineStore.markOffline);
     };
-  }, [session, switching, reauth]);
+  }, [session, switching, reauth, authLoading]);
   async function submit(e: FormEvent<HTMLFormElement>, work: (data: FormData) => Promise<void>) {
     e.preventDefault();
     if (guard.current) return;
@@ -144,6 +146,7 @@ function Online() {
       toast.message("Signed out on this device. Server session will expire.");
     }
   }
+  if(authLoading)return <AuthLayout title={signup?"Creating your account":"Signing in"} subtitle=""><div className="flex min-h-40 items-center justify-center"><AuthProgress label={signup?"Creating account…":"Signing in…"}/></div></AuthLayout>;
   if (!synced.ready)
     return (
       <AuthLayout title="Loading saved shop" subtitle="Opening your shop.">
@@ -165,8 +168,11 @@ function Online() {
 
           <form
             className="space-y-4"
+            aria-busy={busy}
             onSubmit={(e) =>
               submit(e, async (f) => {
+                setAuthLoading(true);
+                try{await waitForAuthPaint();
                 const email = String(f.get("email"));
                 const password = String(f.get("password"));
                 if (signup)
@@ -183,7 +189,9 @@ function Online() {
                 await setSession(result);
                 setReauth(false);
                 setTab("dashboard");
-                toast.success("Signed in online");
+                await onlineStore.sync();
+                toast.success("Welcome back");
+                }finally{setAuthLoading(false);}
               })
             }
           >
@@ -212,7 +220,7 @@ function Online() {
               {busy ? "Connecting…" : signup ? "Create shop and sign in" : "Sign in"}
             </Button>
           </form>
-          <Button variant="ghost" onClick={() => setSignup(!signup)}>
+          <Button variant="ghost" disabled={busy} onClick={() => setSignup(!signup)}>
             {signup ? "Already registered? Sign in" : "Create shop"}
           </Button>
         </div>

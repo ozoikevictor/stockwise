@@ -1,5 +1,6 @@
+import {AuthProgress,waitForAuthPaint} from "@/components/shop/AuthProgress";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import { z } from "zod";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -31,11 +32,12 @@ const schema = z.object({
 
 export function Register() {
   const nav = useNavigate();
+  const submitGuard=useRef(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isSubmitting, setSubmitting] = useState(false);
-  const onSubmit = (event: FormEvent<HTMLFormElement>) => {
+  const onSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (isSubmitting) return;
+    if (submitGuard.current) return;
     const fields = new FormData(event.currentTarget);
     const parsed = schema.safeParse(Object.fromEntries(fields.entries()));
     if (!parsed.success) {
@@ -45,17 +47,18 @@ export function Register() {
       return;
     }
     setErrors({});
-    setSubmitting(true);
+    submitGuard.current=true;setSubmitting(true);
     try {
-      actions.register(parsed.data);
+      await waitForAuthPaint();
+      await actions.register(parsed.data);
       toast.success("Account created");
-      nav({ to: "/setup" });
+      await nav({ to: "/setup" });
     } catch (e) { toast.error((e as Error).message); }
-    finally { setSubmitting(false); }
+    finally { submitGuard.current=false;setSubmitting(false); }
   };
   return (
     <AuthLayout title="Create your owner account" subtitle="Start managing your shop in minutes.">
-      <form onSubmit={onSubmit} className="space-y-4" noValidate>
+      <form onSubmit={onSubmit} aria-busy={isSubmitting} noValidate><fieldset disabled={isSubmitting} className="space-y-4">
         <Field label="Full name" htmlFor="name" error={errors["name"]}><Input id="name" name="name" autoComplete="name" placeholder="Chinedu Okafor" /></Field>
         <Field label="Email" htmlFor="email" error={errors["email"]}><Input id="email" name="email" type="email" autoComplete="email" placeholder="you@shop.ng" /></Field>
         <Field label="Phone number" htmlFor="phone" error={errors["phone"]}><Input id="phone" name="phone" type="tel" autoComplete="tel" placeholder="08031234567" /></Field>
@@ -63,9 +66,9 @@ export function Register() {
           <Field label="Password" htmlFor="password" error={errors["password"]}><PasswordInput id="password" name="password" autoComplete="new-password" /></Field>
           <Field label="Confirm password" htmlFor="confirm" error={errors["confirm"]}><PasswordInput id="confirm" name="confirm" autoComplete="new-password" /></Field>
         </div>
-        <Button type="submit" className="w-full" disabled={isSubmitting}>Create account</Button>
+        <Button type="submit" className="w-full" disabled={isSubmitting}>{isSubmitting?<AuthProgress label="Creating account…"/>:"Create account"}</Button>
         <p className="text-center text-sm text-muted-foreground">Already registered? <Link to="/login" className="font-medium text-primary hover:underline">Log in</Link></p>
-      </form>
+      </fieldset></form>
     </AuthLayout>
   );
 }

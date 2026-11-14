@@ -14,6 +14,23 @@ import { Register } from "@/routes/register";
 
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 describe("desktop registration form", () => {
+  it("shows progress, blocks duplicate submissions and restores the form after failure", async()=>{
+    let fail!:(error:Error)=>void;
+    mocks.register.mockImplementationOnce(()=>new Promise((_resolve,reject)=>{fail=reject;}));
+    render(<Register/>);
+    const values={"Full name":"Test Owner","Email":"owner@example.com","Phone number":"08012345678","Password":"TestPass123","Confirm password":"TestPass123"};
+    for(const [label,value] of Object.entries(values))fireEvent.change(screen.getByLabelText(label),{target:{value}});
+    const submit=screen.getByRole('button',{name:'Create account'});
+    fireEvent.click(submit);
+    expect(await screen.findByRole('button',{name:'Creating account…'})).toBeDisabled();
+    await waitFor(()=>expect(mocks.register).toHaveBeenCalledTimes(1));
+    fireEvent.submit(submit.closest('form')!);
+    expect(mocks.register).toHaveBeenCalledTimes(1);
+    expect(mocks.navigate).not.toHaveBeenCalled();
+    fail(new Error('Could not save account'));
+    await waitFor(()=>expect(screen.getByRole('button',{name:'Create account'})).toBeEnabled());
+    expect(screen.getByLabelText('Email')).toHaveValue('owner@example.com');
+  });
   it("keeps invalid entries editable and shows validation without saving", () => {
     render(<Register />);
     fireEvent.change(screen.getByLabelText("Full name"), { target: { value: "A" } });
