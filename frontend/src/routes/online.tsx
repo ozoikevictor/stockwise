@@ -1,6 +1,5 @@
 import { onlineStore, useOnlineStore } from "@/lib/store";
 import type { OnlineSession } from "@/lib/online-sync-core";
-import { OnlineConnection } from "@/components/shop/OnlineConnection";
 import { OnlineShell } from "@/components/shop/OnlineShell";
 import { AuthLayout } from "@/components/shop/AuthLayout";
 import { PageHeader, StatCard, Panel, EmptyState, ProductThumb } from "@/components/shop/bits";
@@ -158,8 +157,6 @@ function Online() {
         subtitle="Sign in to your shop."
       >
         <div className="space-y-5">
-          <OnlineConnection />
-          {!reauth && synced.message && <p role="status">{synced.message}</p>}
           {reauth && (
             <Button type="button" variant="ghost" onClick={() => setReauth(false)}>
               Back to saved shop
@@ -218,11 +215,6 @@ function Online() {
           <Button variant="ghost" onClick={() => setSignup(!signup)}>
             {signup ? "Already registered? Sign in" : "Create shop"}
           </Button>
-          <p>
-            <Link to="/login" className="text-sm text-primary">
-              Local shop
-            </Link>
-          </p>
         </div>
       </AuthLayout>
     );

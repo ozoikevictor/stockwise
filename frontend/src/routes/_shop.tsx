@@ -64,7 +64,7 @@ function NavList({ onNav }: { onNav?: () => void }) {
         })}
       </nav>
       <div className="border-t border-sidebar-border p-3">
-        <button onClick={() => { actions.logout(); onNav?.(); nav({ to: "/login" }); }}
+        <button onClick={() => { actions.logout(); onNav?.(); nav({ to: "/device-login" }); }}
           className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground">
           <LogOut className="size-4" /> Logout
         </button>

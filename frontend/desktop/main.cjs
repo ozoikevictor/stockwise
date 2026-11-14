@@ -150,8 +150,7 @@ async function start() {
     });
   }
   mainWindow.on("closed", () => { mainWindow = null; });
-  const cachedShop = path.join(folder, "online-cache-" + createHash("sha256").update(onlineServer).digest("hex") + ".bin");
-  await mainWindow.loadURL(origin + (fs.existsSync(cachedShop) ? "/online" : ""));
+  await mainWindow.loadURL(origin + "/online");
 }
 app.on("window-all-closed", () => app.quit());
 app.on("will-quit", () => { backend?.close(); server?.close(); });

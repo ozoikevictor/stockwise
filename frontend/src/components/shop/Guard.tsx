@@ -21,7 +21,7 @@ export function Guard({ children, needShop = true }: { children: ReactNode; need
   const user = useCurrentUser();
   const data = useData();
   if (!ready) return <LoadingScreen />;
-  if (!user) return <Navigate to="/login" />;
+  if (!user) return <Navigate to="/device-login" />;
   if (needShop && !data.shop) return <Navigate to="/setup" />;
   return <>{children}</>;
 }
