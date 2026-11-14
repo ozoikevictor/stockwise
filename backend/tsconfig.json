@@ -1,0 +1,9 @@
+{
+  "extends": "../frontend/tsconfig.json",
+  "include": ["src/**/*.ts"],
+  "compilerOptions": {
+    "types": ["node"],
+    "typeRoots": ["../frontend/node_modules/@types"],
+    "paths": { "zod": ["../frontend/node_modules/zod"] }
+  }
+}

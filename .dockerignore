@@ -1,0 +1,12 @@
+**/node_modules
+**/.env
+**/.env.*
+**/.git
+**/*postgres*
+**/*.sqlite*
+**/*.log
+**/dist*
+**/.output
+**/.nitro
+upgrade-checkpoints
+build-cache

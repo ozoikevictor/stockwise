@@ -1,0 +1,9 @@
+{
+  "name": "stockwise-backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Local SQLite backend for the single-computer StockWise desktop app",
+  "scripts": { "build": "node build.mjs", "test": "npm run build && node --test test/backend.test.cjs" },
+  "engines": { "node": ">=22.13.0" }
+}

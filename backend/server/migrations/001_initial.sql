@@ -1,0 +1,10 @@
+CREATE TABLE IF NOT EXISTS schema_migrations (id TEXT PRIMARY KEY);
+CREATE TABLE IF NOT EXISTS shops (id UUID PRIMARY KEY, name TEXT NOT NULL, timezone TEXT NOT NULL DEFAULT 'Africa/Lagos');
+CREATE TABLE IF NOT EXISTS users (id UUID PRIMARY KEY, shop_id UUID NOT NULL REFERENCES shops(id), email TEXT NOT NULL UNIQUE, name TEXT NOT NULL, role TEXT NOT NULL CHECK (role IN ('owner','cashier')), password_hash TEXT NOT NULL, active BOOLEAN NOT NULL DEFAULT TRUE);
+CREATE TABLE IF NOT EXISTS sessions (token_hash TEXT PRIMARY KEY, user_id UUID NOT NULL REFERENCES users(id), expires_at TIMESTAMPTZ NOT NULL);
+CREATE TABLE IF NOT EXISTS products (id UUID PRIMARY KEY, shop_id UUID NOT NULL REFERENCES shops(id), name TEXT NOT NULL, sku TEXT NOT NULL, cost_minor BIGINT NOT NULL CHECK(cost_minor >= 0), price_minor BIGINT NOT NULL CHECK(price_minor >= 0), quantity INTEGER NOT NULL CHECK(quantity >= 0), archived BOOLEAN NOT NULL DEFAULT FALSE, UNIQUE(shop_id,sku));
+CREATE TABLE IF NOT EXISTS sales (id UUID PRIMARY KEY, shop_id UUID NOT NULL REFERENCES shops(id), cashier_id UUID NOT NULL REFERENCES users(id), idempotency_key UUID NOT NULL, request_hash TEXT NOT NULL, total_minor BIGINT NOT NULL, cost_minor BIGINT NOT NULL, payment TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(shop_id,idempotency_key));
+CREATE TABLE IF NOT EXISTS sale_items (id UUID PRIMARY KEY, sale_id UUID NOT NULL REFERENCES sales(id), product_id UUID NOT NULL REFERENCES products(id), product_name TEXT NOT NULL, quantity INTEGER NOT NULL CHECK(quantity > 0), unit_price_minor BIGINT NOT NULL, unit_cost_minor BIGINT NOT NULL);
+CREATE TABLE IF NOT EXISTS audit_log (id UUID PRIMARY KEY, shop_id UUID NOT NULL REFERENCES shops(id), actor_id UUID NOT NULL REFERENCES users(id), action TEXT NOT NULL, record_id UUID NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE INDEX IF NOT EXISTS products_shop_idx ON products(shop_id);
+CREATE INDEX IF NOT EXISTS sales_shop_cashier_idx ON sales(shop_id,cashier_id);

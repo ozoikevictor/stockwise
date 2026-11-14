@@ -1,0 +1,46 @@
+{
+  "appId": "com.stockwise.desktop",
+  "productName": "StockWise",
+  "directories": {
+    "output": "release-online-design"
+  },
+  "files": [
+    "desktop/main.cjs",
+    "desktop/preload.cjs",
+    "dist-desktop/**/*",
+    "package.json",
+    "!node_modules/**/*",
+    "desktop/stockwise.ico",
+    "desktop/online-target.cjs"
+  ],
+  "extraResources": [
+    {
+      "from": "../backend/dist/backend.cjs",
+      "to": "backend/backend.cjs"
+    }
+  ],
+  "npmRebuild": false,
+  "win": {
+    "target": [
+      {
+        "target": "nsis",
+        "arch": [
+          "x64"
+        ]
+      }
+    ],
+    "signAndEditExecutable": false,
+    "icon": "desktop/stockwise.ico"
+  },
+  "nsis": {
+    "oneClick": false,
+    "perMachine": false,
+    "allowToChangeInstallationDirectory": true,
+    "createDesktopShortcut": true,
+    "createStartMenuShortcut": true,
+    "shortcutName": "StockWise",
+    "deleteAppDataOnUninstall": false,
+    "artifactName": "StockWise-Setup-0.1.0.exe"
+  },
+  "electronDist": "node_modules/electron/dist"
+}
