@@ -1,3 +1,4 @@
+import { recoveryFromEnvironment } from './recovery-mail.js';
 import { createApp } from './app.js';
 import { connectDatabase } from './db.js';
 if (!process.env.DATABASE_URL) throw new Error('Set DATABASE_URL before starting the online backend.');
@@ -5,5 +6,5 @@ if (process.env.RENDER_EXTERNAL_URL && !process.env.PUBLIC_ORIGIN) process.env.P
 const origins = (process.env.ALLOWED_ORIGINS ?? '').split(',').filter(Boolean);
 const pool = connectDatabase(process.env.DATABASE_URL);
 await pool.query('SELECT id FROM schema_migrations LIMIT 1');
-const server = createApp(pool, origins).listen(Number(process.env.PORT ?? 3003), process.env.HOST ?? '127.0.0.1', () => console.log('StockWise online backend listening.'));
+const server = createApp(pool, origins, recoveryFromEnvironment()).listen(Number(process.env.PORT ?? 3003), process.env.HOST ?? '127.0.0.1', () => console.log('StockWise online backend listening.'));
 for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => { server.close(() => { void pool.end(); }); });

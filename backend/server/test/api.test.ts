@@ -10,6 +10,7 @@ import { createApp } from '../src/app.js';
 async function fixture(t: any) {
   const db=newDb();db.public.none(await readFile(new URL('../migrations/001_initial.sql',import.meta.url),'utf8'));db.public.none(await readFile(new URL('../migrations/002_offline_sales.sql',import.meta.url),'utf8'));
   const {Pool}=db.adapters.createPg();const pool=new Pool() as unknown as Pool;t.after(()=>pool.end());
+  await pool.query(await readFile(new URL('../migrations/003_password_recovery.sql',import.meta.url),'utf8'));
   const app=createApp(pool,['http://localhost:5173']);
   const register=async(email:string)=>{await request(app).post('/api/auth/register').send({shopName:'Test shop',name:'Owner',email,password:'OwnerPass123'}).expect(201);const r=await request(app).post('/api/auth/login').send({email,password:'OwnerPass123'}).expect(200);return r.body.token as string;};
   const owner=await register('owner@example.com');

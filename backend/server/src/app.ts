@@ -1,3 +1,4 @@
+import type { RecoveryOptions } from './recovery-mail.js';
 import path from 'node:path';
 import express, { type Request, type Response, type NextFunction } from 'express';
 import type { Pool, PoolClient } from 'pg';
@@ -29,7 +30,7 @@ const safeUser = (u: Actor) => ({id:u.id,shopId:u.shop_id,name:u.name,role:u.rol
 function productDTO(p: any, owner: boolean) { return {id:p.id,name:p.name,sku:p.sku,priceMinor:Number(p.price_minor),quantity:p.quantity,archived:p.archived,...(owner ? {costMinor:Number(p.cost_minor)} : {})}; }
 function saleDTO(s: any, items: any[], owner: boolean) { return {id:s.id,cashierId:s.cashier_id,totalMinor:Number(s.total_minor),payment:s.payment,createdAt:s.recorded_at??s.created_at,syncedAt:s.created_at,...(owner ? {costMinor:Number(s.cost_minor),profitMinor:Number(s.total_minor)-Number(s.cost_minor)} : {}),items:items.map(i=>({productId:i.product_id,productName:i.product_name,quantity:i.quantity,unitPriceMinor:Number(i.unit_price_minor),...(owner?{unitCostMinor:Number(i.unit_cost_minor)}:{})}))}; }
 
-export function createApp(pool: Pool, origins: string[] = []) {
+export function createApp(pool: Pool, origins: string[] = [], recovery?: RecoveryOptions) {
   const app = express();
   app.disable('x-powered-by');
   if (process.env.TRUST_PROXY === '1') app.set('trust proxy', 1);
@@ -68,12 +69,53 @@ export function createApp(pool: Pool, origins: string[] = []) {
   }catch(e){next(e);}});
   app.post('/api/auth/login',limit,async(req,res,next)=>{try{
     const input=z.object({email,password:z.string().min(1).max(128)}).strict().parse(req.body);
-    const {rows}=await pool.query('SELECT * FROM users WHERE email=$1 AND active=TRUE',[input.email]);const u=rows[0];
-    const dummy='scrypt$00000000000000000000000000000000$'+'0'.repeat(128);
-    if(!await verify(input.password,u?.password_hash ?? dummy)||!u)throw new HttpError(401,'Incorrect email or password');
-    const token=randomBytes(32).toString('hex');const expiresAt=new Date(Date.now()+8*60*60*1000);
-    await pool.query('INSERT INTO sessions(token_hash,user_id,expires_at) VALUES($1,$2,$3)',[hash(token),u.id,expiresAt]);
-    res.json({token,expiresAt,user:safeUser(u)});
+    const result=await transaction(pool,async c=>{
+      const {rows}=await c.query('SELECT * FROM users WHERE email=$1 AND active=TRUE FOR UPDATE',[input.email]);const u=rows[0];
+      const dummy='scrypt$00000000000000000000000000000000$'+'0'.repeat(128);
+      if(!await verify(input.password,u?.password_hash??dummy)||!u)throw new HttpError(401,'Incorrect email or password');
+      const token=randomBytes(32).toString('hex');const expiresAt=new Date(Date.now()+8*60*60*1000);
+      await c.query('INSERT INTO sessions(token_hash,user_id,expires_at) VALUES($1,$2,$3)',[hash(token),u.id,expiresAt]);
+      return {token,expiresAt,user:safeUser(u)};
+    });res.json(result);
+  }catch(e){next(e);}});
+  const recoveryAttempts=new Map<string,number>();
+  app.post('/api/auth/forgot-password',limit,async(req,res,next)=>{try{
+    const input=z.object({email}).strict().parse(req.body);
+    if(!recovery)throw new HttpError(503,'Email recovery is currently unavailable. Cashiers can ask their shop owner to reset their password.');
+    const reply={message:'If an active account uses that email, a recovery link will be sent. Cashiers can also ask their shop owner for help.'};
+    const now=Date.now();for(const [k,until] of recoveryAttempts)if(until<=now)recoveryAttempts.delete(k);
+    const key=hash(input.email);if(recoveryAttempts.has(key)||recoveryAttempts.size>=10000){res.status(202).json(reply);return;}
+    recoveryAttempts.set(key,now+60000);
+    const token=randomBytes(32).toString('hex');const tokenHash=hash(token);
+    const u=await transaction(pool,async c=>{
+      const {rows}=await c.query('SELECT id,email FROM users WHERE email=$1 AND active=TRUE FOR UPDATE',[input.email]);const person=rows[0];if(!person)return null;
+      await c.query('DELETE FROM password_resets WHERE user_id=$1',[person.id]);
+      await c.query('INSERT INTO password_resets(token_hash,user_id,expires_at) VALUES($1,$2,$3)',[tokenHash,person.id,new Date(now+15*60000)]);return person;
+    });
+    // Respond identically before email delivery; never return or log the token.
+    res.status(202).json(reply);
+    if(u)setImmediate(()=>{void recovery.send({to:u.email,url:new URL('/online#reset='+token,recovery.origin).toString()}).catch(async()=>{console.error('Password recovery email delivery failed');try{await pool.query('DELETE FROM password_resets WHERE token_hash=$1',[tokenHash]);}catch{}});});
+  }catch(e){next(e);}});
+  app.post('/api/auth/reset-password',limit,async(req,res,next)=>{try{
+    const input=z.object({token:z.string().regex(/^[a-f0-9]{64}$/),password}).strict().parse(req.body);
+    const digest=await encode(input.password);const tokenHash=hash(input.token);
+    await transaction(pool,async c=>{
+      const found=await c.query('SELECT user_id FROM password_resets WHERE token_hash=$1',[tokenHash]);const target=found.rows[0];if(!target)throw new HttpError(400,'This recovery link is invalid or expired. Request a new link.');
+      const user=await c.query('SELECT id,shop_id,name,role,active FROM users WHERE id=$1 FOR UPDATE',[target.user_id]);const u=user.rows[0];if(!u?.active)throw new HttpError(400,'This recovery link is invalid or expired. Request a new link.');
+      const used=await c.query('DELETE FROM password_resets WHERE token_hash=$1 AND expires_at > $2 RETURNING user_id',[tokenHash,new Date()]);if(!used.rows[0])throw new HttpError(400,'This recovery link is invalid or expired. Request a new link.');
+      await c.query('UPDATE users SET password_hash=$1 WHERE id=$2',[digest,u.id]);
+      await c.query('DELETE FROM sessions WHERE user_id=$1',[u.id]);await c.query('DELETE FROM password_resets WHERE user_id=$1',[u.id]);
+      await audit(c,u,'password.recovered',u.id);
+    });res.json({message:'Password updated. Sign in with your new password.'});
+  }catch(e){next(e);}});
+  app.post('/api/staff/:id/password',auth,owner,limit,async(req,res,next)=>{try{
+    const id=z.string().uuid().parse(req.params.id);const input=z.object({ownerPassword:z.string().min(1).max(128),password}).strict().parse(req.body);const a:Actor=res.locals.actor;
+    await transaction(pool,async c=>{
+      const own=await c.query('SELECT password_hash FROM users WHERE id=$1 FOR UPDATE',[a.id]);if(!await verify(input.ownerPassword,own.rows[0].password_hash))throw new HttpError(401,'Your owner password is incorrect');
+      const target=await c.query("SELECT id FROM users WHERE id=$1 AND shop_id=$2 AND role='cashier' AND active=TRUE FOR UPDATE",[id,a.shop_id]);if(!target.rows[0])throw new HttpError(404,'Cashier not found');
+      await c.query('UPDATE users SET password_hash=$1 WHERE id=$2',[await encode(input.password),id]);
+      await c.query('DELETE FROM sessions WHERE user_id=$1',[id]);await c.query('DELETE FROM password_resets WHERE user_id=$1',[id]);await audit(c,a,'staff.password_reset',id);
+    });res.json({message:'Cashier password updated. They must sign in again.'});
   }catch(e){next(e);}});
   app.post('/api/auth/logout',auth,async(req,res,next)=>{try{await pool.query('DELETE FROM sessions WHERE token_hash=$1',[hash(req.headers.authorization!.slice(7))]);res.sendStatus(204);}catch(e){next(e);}});
   app.get('/api/auth/accounts',auth,async(_req,res,next)=>{try{

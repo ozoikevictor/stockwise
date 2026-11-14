@@ -14,7 +14,9 @@ test('real PostgreSQL: concurrent tills, duplicate retry and multi-line rollback
   const pool=new Pool({connectionString:process.env.TEST_DATABASE_URL,options:`-c search_path=${schema}`,max:6});
   t.after(async()=>{await pool.end();await admin.query(`DROP SCHEMA ${schema} CASCADE`);await admin.end();});
   await pool.query(await readFile(new URL('../migrations/001_initial.sql',import.meta.url),'utf8'));await pool.query(await readFile(new URL('../migrations/002_offline_sales.sql',import.meta.url),'utf8'));
-  const app=createApp(pool);
+  await pool.query(await readFile(new URL('../migrations/003_password_recovery.sql',import.meta.url),'utf8'));
+  let recoveryLink='';
+  const app=createApp(pool,[],{origin:'https://shop.example',send:async m=>{recoveryLink=m.url;}});
   await request(app).post('/api/auth/register').send({shopName:'Concurrency test',name:'Owner',email:'owner@example.com',password:'OwnerPass123'}).expect(201);
   const login=await request(app).post('/api/auth/login').send({email:'owner@example.com',password:'OwnerPass123'}).expect(200);
   const token=login.body.token;
@@ -37,4 +39,11 @@ test('real PostgreSQL: concurrent tills, duplicate retry and multi-line rollback
   await request(app).post('/api/sales').auth(token,{type:'bearer'}).send({idempotencyKey:randomUUID(),payment:'Cash',recordedAt:'2026-01-01T10:00:00.000Z',lines:[{productId:priceConflict,quantity:1,expectedPriceMinor:1}]}).expect(409);
   assert.equal((await pool.query('SELECT quantity FROM products WHERE id=$1',[priceConflict])).rows[0].quantity,2);
   assert.equal((await pool.query('SELECT count(*) AS count FROM sales')).rows[0].count,'2');
+  await request(app).post('/api/auth/forgot-password').send({email:'owner@example.com'}).expect(202);
+  await new Promise(setImmediate);
+  const resetToken=new URL(recoveryLink).hash.slice('#reset='.length);
+  const resets=await Promise.all(['NewOwnerPass123','OtherOwnerPass123'].map(password=>request(app).post('/api/auth/reset-password').send({token:resetToken,password})));
+  assert.deepEqual(resets.map(r=>r.status).sort(),[200,400]);
+  await request(app).get('/api/me').auth(token,{type:'bearer'}).expect(401);
+
 });

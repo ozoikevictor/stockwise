@@ -5,7 +5,7 @@ const pool = connectDatabase(process.env.DATABASE_URL);
 const client = await pool.connect();
 try {
   await client.query('BEGIN');
-  for (const file of ['001_initial','002_offline_sales']) {
+  for (const file of ['001_initial','002_offline_sales','003_password_recovery']) {
     await client.query(await readFile(new URL('../migrations/'+file+'.sql', import.meta.url), 'utf8'));
     await client.query('INSERT INTO schema_migrations(id) VALUES ($1) ON CONFLICT DO NOTHING',[file]);
   }

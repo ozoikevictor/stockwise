@@ -1,3 +1,5 @@
+import {PasswordRecovery,takeResetToken} from "@/components/shop/PasswordRecovery";
+import {StaffPasswordReset} from "@/components/shop/StaffPasswordReset";
 import {AuthProgress,waitForAuthPaint} from "@/components/shop/AuthProgress";
 import { onlineStore, useOnlineStore } from "@/lib/store";
 import type { OnlineSession } from "@/lib/online-sync-core";
@@ -31,6 +33,8 @@ const minor = (value: FormDataEntryValue | null) => {
   return Math.round(n * 100);
 };
 function Online() {
+  const [recoveryOpen,setRecoveryOpen]=useState(false);
+  const [resetToken,setResetToken]=useState(takeResetToken);
   const synced = useOnlineStore();
   const session = synced.session;
   const products = onlineStore.available();
@@ -54,6 +58,7 @@ function Online() {
   const [authLoading,setAuthLoading]=useState(false);
   const [busy, setBusy] = useState(false);
   const [tab, setTab] = useState("dashboard");
+  const [staffVersion,setStaffVersion]=useState(0);
   const [selected, setSelected] = useState("");
   const [qty, setQty] = useState(1);
   const guard = useRef(false);
@@ -98,7 +103,7 @@ function Online() {
     void onlineStore.restore();
   }, []);
   useEffect(() => {
-    if (!session || switching || reauth || authLoading) return;
+    if (!session || switching || reauth || authLoading || recoveryOpen || resetToken) return;
     const run = () => {
       void onlineStore.sync();
     };
@@ -111,7 +116,7 @@ function Online() {
       window.removeEventListener("online", run);
       window.removeEventListener("offline", onlineStore.markOffline);
     };
-  }, [session, switching, reauth, authLoading]);
+  }, [session, switching, reauth, authLoading,recoveryOpen,resetToken]);
   async function submit(e: FormEvent<HTMLFormElement>, work: (data: FormData) => Promise<void>) {
     e.preventDefault();
     if (guard.current) return;
@@ -146,6 +151,7 @@ function Online() {
       toast.message("Signed out on this device. Server session will expire.");
     }
   }
+  if(recoveryOpen||resetToken)return <PasswordRecovery token={resetToken} onBack={()=>{setRecoveryOpen(false);setResetToken('');}} onDone={()=>{setRecoveryOpen(false);setResetToken('');setReauth(!!session);}}/>;
   if(authLoading)return <AuthLayout title={signup?"Creating your account":"Signing in"} subtitle=""><div className="flex min-h-40 items-center justify-center"><AuthProgress label={signup?"Creating account…":"Signing in…"}/></div></AuthLayout>;
   if (!synced.ready)
     return (
@@ -216,6 +222,7 @@ function Online() {
                 required
               />
             </Field>
+            {!signup&&<div className="text-right"><Button type="button" variant="link" className="h-auto p-0" disabled={busy} onClick={()=>setRecoveryOpen(true)}>Forgot password?</Button></div>}
             <Button disabled={busy} className="w-full">
               {busy ? "Connecting…" : signup ? "Create shop and sign in" : "Sign in"}
             </Button>
@@ -592,7 +599,7 @@ function Online() {
                 email: String(f.get("email")),
                 password: String(f.get("password")),
               });
-              toast.success("Online cashier account created");
+              setStaffVersion(v=>v+1);toast.success("Cashier account created");
             })
           }
         >
@@ -609,6 +616,7 @@ function Online() {
           <Button disabled={busy}>{busy ? "Creating…" : "Create cashier"}</Button>
         </form>
       )}
+      {tab === "staff" && owner && <StaffPasswordReset key={staffVersion} token={session.token}/>}
       {tab === "sell" && (
         <form
           className="max-w-2xl space-y-5 rounded-2xl border bg-card p-6 shadow-card"
