@@ -29,7 +29,7 @@ async function start() {
   fs.mkdirSync(folder, { recursive: true });
   backend = openBackend(path.join(folder, "stockwise.sqlite"));
   const configFile = path.join(folder, "online-server.json");
-  let onlineServer = onlineTarget(process.env.STOCKWISE_ONLINE_URL || "http://127.0.0.1:3003");
+  let onlineServer = onlineTarget(process.env.STOCKWISE_ONLINE_URL || "https://stockwise-online.onrender.com");
   if (fs.existsSync(configFile)) onlineServer = onlineTarget(JSON.parse(fs.readFileSync(configFile, "utf8")).url);
   ipcMain.handle("stockwise:online-config", async (event, value) => {
     if (!mainWindow || event.sender !== mainWindow.webContents || event.senderFrame !== mainWindow.webContents.mainFrame || new URL(event.senderFrame.url).origin !== origin) throw new Error("Untrusted request.");
@@ -140,5 +140,6 @@ async function start() {
 }
 app.on("window-all-closed", () => app.quit());
 app.on("will-quit", () => { backend?.close(); server?.close(); });
+
 
 
