@@ -1,6 +1,6 @@
 # StockWise hosted setup
 
-The cloud service serves the online dashboard and Express API from the same HTTPS address. PostgreSQL stores shared shop records. Desktop SQLite data is unchanged. Offline sales synchronization is still a separate phase.
+The cloud service serves the online dashboard and Express API from the same HTTPS address. PostgreSQL stores shared shop records. Desktop SQLite data is unchanged. Connected desktop sessions now cache products and queue offline sales. Existing standalone SQLite shops are not imported or synchronized by this feature.
 
 ## Free testing limitations
 
@@ -32,4 +32,4 @@ A fresh hosted database starts empty. Local PostgreSQL test accounts/products do
 
 ## Validation limits
 
-Docker needs a Linux Docker engine. This Windows session has no Docker CLI and cannot verify a deployed container. Live PostgreSQL concurrency checks require TEST_DATABASE_URL pointed at a disposable test database. The API rate limiter is per process: keep one instance until a shared limiter is added. Monitor hosting backups and test restore before live shop use. Internet loss currently blocks online operations; queued offline sales are not implemented yet.
+Docker needs a Linux Docker engine. This Windows session has no Docker CLI and cannot verify a deployed container. Live PostgreSQL concurrency checks require TEST_DATABASE_URL pointed at a disposable test database. The API rate limiter is per process: keep one instance until a shared limiter is added. Monitor hosting backups and test restore before live shop use. The desktop app can queue sales after an online sign-in and catalog download. See OFFLINE_SYNC.md for limits and validation.

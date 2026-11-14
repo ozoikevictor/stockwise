@@ -1,6 +1,8 @@
 import { useSyncExternalStore } from "react";
 import { createStoreCore, type State, type StoreActions } from "./store-core";
 import { demoHash } from "./format";
+import { createOnlineSync, type SyncDisk } from "./online-sync-core";
+import { onlineRequest } from "./online-api";
 import { emptyShopData } from "./seed";
 import { can, type Perm } from "./permissions";
 export type { Actor } from "./store-core";
@@ -8,7 +10,7 @@ export type { Actor } from "./store-core";
 type DesktopReply = { ok: boolean; state?: State; result?: unknown; error?: string };
 declare global {
   interface Window {
-    stockwiseDesktop?: { onlineConfig(value?: string): Promise<string>; request(command: string, args: unknown[]): DesktopReply; printReceipt(saleId: string): Promise<{ ok: boolean; error?: string }> };
+    stockwiseDesktop?: { offlineData(value?: SyncDisk): Promise<SyncDisk | null>; onlineConfig(value?: string): Promise<string>; request(command: string, args: unknown[]): DesktopReply; printReceipt(saleId: string): Promise<{ ok: boolean; error?: string }> };
   }
 }
 const SERVER_STATE: State = { ready: false, auth: { users: [], sessionUserId: null }, data: emptyShopData(), actor: null, locked: false };
@@ -66,3 +68,35 @@ export const actions: StoreActions = new Proxy(browserCore.actions, {
     return (...args: unknown[]) => request(property, args);
   },
 });
+
+// The connected shop has its own server-scoped cache; SQLite local shops remain separate.
+let browserLock:Promise<void>|undefined;
+let browserAllowed=false;
+async function claimBrowserCache(){
+  if(desktop())return;
+  if(!browserLock)browserLock=new Promise<void>((resolve,reject)=>{
+    if(!navigator.locks){reject(Error('Use the desktop app for durable offline sales on this browser.'));return;}
+    void navigator.locks.request('stockwise-online-cache',{ifAvailable:true},async lock=>{
+      browserAllowed=!!lock;resolve();if(lock)await new Promise(()=>{});
+    }).catch(reject);
+  });
+  await browserLock;if(!browserAllowed)throw Error('StockWise is open in another tab. Close that tab and reload this one.');
+}
+export const onlineStore=createOnlineSync({
+  async load(){
+    const bridge=desktop();if(bridge)return bridge.offlineData();
+    await claimBrowserCache();
+    const saved=localStorage.getItem('stockwise-online-cache-v1');
+    const data:SyncDisk=saved?JSON.parse(saved):{version:1,session:null,accounts:{}};
+    data.session=JSON.parse(sessionStorage.getItem('stockwise-online-session')??'null');return data;
+  },
+  async save(data){
+    const bridge=desktop();if(bridge){await bridge.offlineData(data);return;}
+    await claimBrowserCache();
+    localStorage.setItem('stockwise-online-cache-v1',JSON.stringify({...data,session:null}));
+    sessionStorage.setItem('stockwise-online-session',JSON.stringify(data.session));
+  },
+  api:onlineRequest,
+  online:()=>navigator.onLine,
+});
+export const useOnlineStore=()=>useSyncExternalStore(onlineStore.subscribe,onlineStore.getState,onlineStore.getState);

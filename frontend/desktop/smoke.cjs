@@ -12,7 +12,8 @@ function finish(error) {
   if (finished) return;
   finished = true; clearTimeout(timeout);
   if (error) console.error(error.stack || error);
-  else console.log('PASS: desktop loads, IPC saves a sale, reload locks the app, and saved stock is restored.');
+  else console.log('PASS: desktop loads, encrypted offline storage is server-scoped, IPC saves a sale, reload locks the app, and saved stock is restored.');
+  if(process.env.STOCKWISE_SMOKE_RESULT)fs.writeFileSync(process.env.STOCKWISE_SMOKE_RESULT,JSON.stringify({ok:!error,error:error?.stack||null}));
   app.exit(error ? 1 : 0);
 }
 app.on('browser-window-created', (_event, window) => {
@@ -21,6 +22,15 @@ app.on('browser-window-created', (_event, window) => {
       const result = await window.webContents.executeJavaScript(`(async () => {
         const api = window.stockwiseDesktop;
         if (!api) throw new Error('Desktop preload did not load');
+        const sample={version:1,session:null,accounts:{probe:{products:[],sales:[],queue:[{id:'offline-probe'}],updatedAt:''}}};
+        await api.offlineData(sample);
+        const saved=await api.offlineData();
+        if(saved.accounts.probe.queue[0].id!=='offline-probe')throw new Error('Encrypted offline records were not restored');
+        const originalServer=await api.onlineConfig();
+        await api.onlineConfig('https://offline-test.invalid');
+        if(await api.offlineData()!==null)throw new Error('Offline records leaked across servers');
+        await api.onlineConfig(originalServer);
+        if((await api.offlineData()).accounts.probe.queue[0].id!=='offline-probe')throw new Error('Original server records missing');
         const call = (cmd, ...args) => { const r = api.request(cmd, args); if (!r.ok) throw new Error(r.error); return r; };
         call('register', {name:'Desktop Test',email:'desktop@example.com',phone:'08012345678',password:'DesktopPass123'});
         call('setupShop', {name:'Desktop Test Shop',address:'',currency:'NGN',timezone:'Africa/Lagos',receiptNote:''}, false);

@@ -1,9 +1,10 @@
-const { app, BrowserWindow, ipcMain, dialog } = require("electron");
+const { app, BrowserWindow, ipcMain, dialog, safeStorage } = require("electron");
 const { createServer, request: httpRequest } = require("node:http");
 const fs = require("node:fs");
 const { request: httpsRequest } = require("node:https");
 const { onlineTarget } = require("./online-target.cjs");
 const path = require("node:path");
+const { createHash } = require("node:crypto");
 const { openBackend } = require(app.isPackaged
   ? path.join(process.resourcesPath, "backend/backend.cjs")
   : "../../backend/dist/backend.cjs");
@@ -41,6 +42,19 @@ async function start() {
       onlineServer = next;
     }
     return onlineServer;
+  });
+  ipcMain.handle("stockwise:offline-data", async (event, value) => {
+    if (!mainWindow || event.sender !== mainWindow.webContents || event.senderFrame !== mainWindow.webContents.mainFrame || new URL(event.senderFrame.url).origin !== origin) throw new Error("Untrusted offline request.");
+    if (!safeStorage.isEncryptionAvailable()) throw new Error("Windows encrypted storage is unavailable. Offline sales cannot be saved.");
+    const file = path.join(folder, "online-cache-" + createHash("sha256").update(onlineServer).digest("hex") + ".bin");
+    if (value === undefined) return fs.existsSync(file) ? JSON.parse(safeStorage.decryptString(fs.readFileSync(file))) : null;
+    const text = JSON.stringify(value);
+    if (text.length > 20000000 || value?.version !== 1) throw new Error("Invalid offline records or offline storage is full.");
+    // Keep the last complete version for recovery; replace only after a full write.
+    const temporary = file + ".tmp";
+    fs.writeFileSync(temporary, safeStorage.encryptString(text));
+    if (fs.existsSync(file)) fs.copyFileSync(file, file + ".bak");
+    fs.renameSync(temporary, file);
   });
   const backupFolder = path.join(folder, "backups");
   fs.mkdirSync(backupFolder, { recursive: true });

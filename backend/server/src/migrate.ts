@@ -5,7 +5,10 @@ const pool = connectDatabase(process.env.DATABASE_URL);
 const client = await pool.connect();
 try {
   await client.query('BEGIN');
-  await client.query(await readFile(new URL('../migrations/001_initial.sql', import.meta.url), 'utf8'));
+  for (const file of ['001_initial','002_offline_sales']) {
+    await client.query(await readFile(new URL('../migrations/'+file+'.sql', import.meta.url), 'utf8'));
+    await client.query('INSERT INTO schema_migrations(id) VALUES ($1) ON CONFLICT DO NOTHING',[file]);
+  }
   await client.query("INSERT INTO schema_migrations(id) VALUES ('001_initial') ON CONFLICT DO NOTHING");
   await client.query('COMMIT');
   console.log('Online schema ready. Existing desktop SQLite was not modified.');

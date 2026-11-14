@@ -13,7 +13,7 @@ test('real PostgreSQL: concurrent tills, duplicate retry and multi-line rollback
   await admin.query(`CREATE SCHEMA ${schema}`);
   const pool=new Pool({connectionString:process.env.TEST_DATABASE_URL,options:`-c search_path=${schema}`,max:6});
   t.after(async()=>{await pool.end();await admin.query(`DROP SCHEMA ${schema} CASCADE`);await admin.end();});
-  await pool.query(await readFile(new URL('../migrations/001_initial.sql',import.meta.url),'utf8'));
+  await pool.query(await readFile(new URL('../migrations/001_initial.sql',import.meta.url),'utf8'));await pool.query(await readFile(new URL('../migrations/002_offline_sales.sql',import.meta.url),'utf8'));
   const app=createApp(pool);
   await request(app).post('/api/auth/register').send({shopName:'Concurrency test',name:'Owner',email:'owner@example.com',password:'OwnerPass123'}).expect(201);
   const login=await request(app).post('/api/auth/login').send({email:'owner@example.com',password:'OwnerPass123'}).expect(200);
@@ -32,5 +32,9 @@ test('real PostgreSQL: concurrent tills, duplicate retry and multi-line rollback
   assert.equal(rows.rows.find(p=>p.id===last).quantity,0);
   assert.equal(rows.rows.find(p=>p.id===retryProduct).quantity,1);
   assert.equal(rows.rows.find(p=>p.id===available).quantity,3);
+  assert.equal((await pool.query('SELECT count(*) AS count FROM sales')).rows[0].count,'2');
+  const priceConflict=await makeProduct(2);
+  await request(app).post('/api/sales').auth(token,{type:'bearer'}).send({idempotencyKey:randomUUID(),payment:'Cash',recordedAt:'2026-01-01T10:00:00.000Z',lines:[{productId:priceConflict,quantity:1,expectedPriceMinor:1}]}).expect(409);
+  assert.equal((await pool.query('SELECT quantity FROM products WHERE id=$1',[priceConflict])).rows[0].quantity,2);
   assert.equal((await pool.query('SELECT count(*) AS count FROM sales')).rows[0].count,'2');
 });

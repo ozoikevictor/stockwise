@@ -5,6 +5,7 @@ const { contextBridge, ipcRenderer } = require("electron");
 // Each command is bounded, validated, and committed locally before returning.
 contextBridge.exposeInMainWorld("stockwiseDesktop", {
   request: (command, args) => ipcRenderer.sendSync("stockwise:request", command, args),
+  offlineData: (value) => ipcRenderer.invoke("stockwise:offline-data", value),
   onlineConfig: (value) => ipcRenderer.invoke("stockwise:online-config", value),
   printReceipt: (saleId) => ipcRenderer.invoke("stockwise:print", saleId),
 });

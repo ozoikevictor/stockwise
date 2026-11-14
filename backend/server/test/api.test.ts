@@ -8,7 +8,7 @@ import type { Pool } from 'pg';
 import { createApp } from '../src/app.js';
 
 async function fixture(t: any) {
-  const db=newDb();db.public.none(await readFile(new URL('../migrations/001_initial.sql',import.meta.url),'utf8'));
+  const db=newDb();db.public.none(await readFile(new URL('../migrations/001_initial.sql',import.meta.url),'utf8'));db.public.none(await readFile(new URL('../migrations/002_offline_sales.sql',import.meta.url),'utf8'));
   const {Pool}=db.adapters.createPg();const pool=new Pool() as unknown as Pool;t.after(()=>pool.end());
   const app=createApp(pool,['http://localhost:5173']);
   const register=async(email:string)=>{await request(app).post('/api/auth/register').send({shopName:'Test shop',name:'Owner',email,password:'OwnerPass123'}).expect(201);const r=await request(app).post('/api/auth/login').send({email,password:'OwnerPass123'}).expect(200);return r.body.token as string;};
@@ -68,6 +68,23 @@ test('restock is owner-only, repeat-safe, and receipts omit financial data',asyn
   await request(f.app).post('/api/staff').auth(f.owner,{type:'bearer'}).send({name:'Staff B',email:'receipt-b@example.com',password:'CashierPass123'}).expect(201);
   const b=await request(f.app).post('/api/auth/login').send({email:'receipt-b@example.com',password:'CashierPass123'}).expect(200);
   await request(f.app).get('/api/sales/'+sale.body.id+'/receipt').auth(b.body.token,{type:'bearer'}).expect(404);
+});
+
+test('offline sale price checks and recorded time survive replay',async t=>{
+  const f=await fixture(t);
+  const recordedAt='2026-01-01T10:00:00.000Z';
+  const payload={idempotencyKey:randomUUID(),payment:'Cash',recordedAt,lines:[{productId:f.product.id,quantity:2,expectedPriceMinor:150000}]};
+  const sale=await request(f.app).post('/api/sales').auth(f.staff,{type:'bearer'}).send(payload).expect(201);
+  assert.equal(new Date(sale.body.createdAt).toISOString(),recordedAt);
+  assert.ok(sale.body.syncedAt);
+  assert.equal(sale.body.profitMinor,undefined);
+  const repeat=await request(f.app).post('/api/sales').auth(f.staff,{type:'bearer'}).send(payload).expect(200);
+  assert.equal(repeat.body.id,sale.body.id);
+  const wrong={...payload,idempotencyKey:randomUUID(),lines:[{productId:f.product.id,quantity:1,expectedPriceMinor:100}]};
+  const rejected=await request(f.app).post('/api/sales').auth(f.staff,{type:'bearer'}).send(wrong).expect(409);
+  assert.match(rejected.body.error,/price changed/i);
+  const stock=await request(f.app).get('/api/products').auth(f.staff,{type:'bearer'}).expect(200);
+  assert.equal(stock.body[0].quantity,8);
 });
 
 test('account switching requires target password, stays in shop and revokes old session',async t=>{

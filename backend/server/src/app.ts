@@ -19,7 +19,7 @@ const email = z.string().trim().email().max(254).transform(s => s.toLowerCase())
 const password = z.string().min(8).max(128);
 const short = z.string().trim().min(1).max(200);
 const minor = z.number().int().min(0).max(1_000_000_000);
-const saleInput = z.object({ idempotencyKey:z.string().uuid(), payment:z.enum(['Cash','Transfer','POS','Other']), lines:z.array(z.object({productId:z.string().uuid(),quantity:z.number().int().min(1).max(10000)}).strict()).min(1).max(100) }).strict();
+const saleInput = z.object({ idempotencyKey:z.string().uuid(), payment:z.enum(['Cash','Transfer','POS','Other']), recordedAt:z.string().datetime().refine(s=>Date.parse(s)<=Date.now()+5*60*1000,'Device clock is ahead of server time').optional(), lines:z.array(z.object({productId:z.string().uuid(),quantity:z.number().int().min(1).max(10000),expectedPriceMinor:minor.optional()}).strict()).min(1).max(100) }).strict();
 async function transaction<T>(pool: Pool, fn: (client: PoolClient) => Promise<T>): Promise<T> {
   const client = await pool.connect();
   try { await client.query('BEGIN'); const value = await fn(client); await client.query('COMMIT'); return value; }
@@ -27,7 +27,7 @@ async function transaction<T>(pool: Pool, fn: (client: PoolClient) => Promise<T>
 }
 const safeUser = (u: Actor) => ({id:u.id,shopId:u.shop_id,name:u.name,role:u.role});
 function productDTO(p: any, owner: boolean) { return {id:p.id,name:p.name,sku:p.sku,priceMinor:Number(p.price_minor),quantity:p.quantity,archived:p.archived,...(owner ? {costMinor:Number(p.cost_minor)} : {})}; }
-function saleDTO(s: any, items: any[], owner: boolean) { return {id:s.id,cashierId:s.cashier_id,totalMinor:Number(s.total_minor),payment:s.payment,createdAt:s.created_at,...(owner ? {costMinor:Number(s.cost_minor),profitMinor:Number(s.total_minor)-Number(s.cost_minor)} : {}),items:items.map(i=>({productId:i.product_id,productName:i.product_name,quantity:i.quantity,unitPriceMinor:Number(i.unit_price_minor),...(owner?{unitCostMinor:Number(i.unit_cost_minor)}:{})}))}; }
+function saleDTO(s: any, items: any[], owner: boolean) { return {id:s.id,cashierId:s.cashier_id,totalMinor:Number(s.total_minor),payment:s.payment,createdAt:s.recorded_at??s.created_at,syncedAt:s.created_at,...(owner ? {costMinor:Number(s.cost_minor),profitMinor:Number(s.total_minor)-Number(s.cost_minor)} : {}),items:items.map(i=>({productId:i.product_id,productName:i.product_name,quantity:i.quantity,unitPriceMinor:Number(i.unit_price_minor),...(owner?{unitCostMinor:Number(i.unit_cost_minor)}:{})}))}; }
 
 export function createApp(pool: Pool, origins: string[] = []) {
   const app = express();
@@ -59,7 +59,7 @@ export function createApp(pool: Pool, origins: string[] = []) {
   };
   const owner=(_req:Request,res:Response,next:NextFunction)=>res.locals.actor.role==='owner'?next():next(new HttpError(403,'Owner access required'));
   async function audit(c:PoolClient,a:Actor,action:string,id:string){await c.query('INSERT INTO audit_log(id,shop_id,actor_id,action,record_id) VALUES($1,$2,$3,$4,$5)',[randomUUID(),a.shop_id,a.id,action,id]);}
-  app.get('/api/health',async(_req,res,next)=>{try{await pool.query('SELECT 1');res.json({ok:true,service:'stockwise-online'});}catch(e){next(e);}});
+  app.get('/api/health',async(_req,res,next)=>{try{await pool.query('SELECT 1');res.json({ok:true,service:'stockwise-online',offlineSalesVersion:1});}catch(e){next(e);}});
   app.post('/api/auth/register',limit,async(req,res,next)=>{try{
     const input=z.object({shopName:short,name:short,email,password}).strict().parse(req.body);
     const digest=await encode(input.password); const shopId=randomUUID();const userId=randomUUID();
@@ -121,12 +121,12 @@ export function createApp(pool: Pool, origins: string[] = []) {
     const items=await pool.query('SELECT * FROM sale_items WHERE sale_id=$1',[id]);const shop=await pool.query('SELECT name,timezone FROM shops WHERE id=$1',[a.shop_id]);const cashier=await pool.query('SELECT name FROM users WHERE id=$1',[s.cashier_id]);
     res.json({shopName:shop.rows[0].name,timezone:shop.rows[0].timezone,cashierName:cashier.rows[0]?.name ?? '',...saleDTO(s,items.rows,false)});
   }catch(e){next(e);}});
-  app.get('/api/sales',auth,async(_req,res,next)=>{try{const a:Actor=res.locals.actor;const {rows}=await pool.query(a.role==='owner'?'SELECT * FROM sales WHERE shop_id=$1 ORDER BY created_at DESC LIMIT 200':'SELECT * FROM sales WHERE shop_id=$1 AND cashier_id=$2 ORDER BY created_at DESC LIMIT 200',a.role==='owner'?[a.shop_id]:[a.shop_id,a.id]);const output=[];for(const s of rows){const items=await pool.query('SELECT * FROM sale_items WHERE sale_id=$1',[s.id]);output.push(saleDTO(s,items.rows,a.role==='owner'));}res.json(output);}catch(e){next(e);}});
+  app.get('/api/sales',auth,async(_req,res,next)=>{try{const a:Actor=res.locals.actor;const {rows}=await pool.query(a.role==='owner'?'SELECT * FROM sales WHERE shop_id=$1 ORDER BY COALESCE(recorded_at,created_at) DESC LIMIT 200':'SELECT * FROM sales WHERE shop_id=$1 AND cashier_id=$2 ORDER BY COALESCE(recorded_at,created_at) DESC LIMIT 200',a.role==='owner'?[a.shop_id]:[a.shop_id,a.id]);const output=[];for(const s of rows){const items=await pool.query('SELECT * FROM sale_items WHERE sale_id=$1',[s.id]);output.push(saleDTO(s,items.rows,a.role==='owner'));}res.json(output);}catch(e){next(e);}});
   app.post('/api/sales',auth,async(req,res,next)=>{try{
     const input=saleInput.parse(req.body);const a:Actor=res.locals.actor;
     const lines=[...input.lines].sort((x,y)=>x.productId.localeCompare(y.productId));
     if(new Set(lines.map(l=>l.productId)).size!==lines.length)throw new HttpError(400,'Combine duplicate product lines');
-    const fingerprint=hash(JSON.stringify({payment:input.payment,lines}));
+    const fingerprint=hash(JSON.stringify({payment:input.payment,lines,...(input.recordedAt?{recordedAt:input.recordedAt}:{})}));
     const run=()=>transaction(pool,async c=>{
       const old=await c.query('SELECT * FROM sales WHERE shop_id=$1 AND idempotency_key=$2',[a.shop_id,input.idempotencyKey]);
       if(old.rows[0]){const s=old.rows[0];if(s.cashier_id!==a.id||s.request_hash!==fingerprint)throw new HttpError(409,'Idempotency key already used');return {sale:s,items:(await c.query('SELECT * FROM sale_items WHERE sale_id=$1',[s.id])).rows,replay:true};}
@@ -135,9 +135,9 @@ export function createApp(pool: Pool, origins: string[] = []) {
       const id=randomUUID();
       await c.query('INSERT INTO sales(id,shop_id,cashier_id,idempotency_key,request_hash,total_minor,cost_minor,payment) VALUES($1,$2,$3,$4,$5,0,0,$6)',[id,a.shop_id,a.id,input.idempotencyKey,fingerprint,input.payment]);
       const items=[];let total=0;let cost=0;
-      for(const line of lines){const {rows}=await c.query('SELECT * FROM products WHERE id=$1 AND shop_id=$2 AND archived=FALSE FOR UPDATE',[line.productId,a.shop_id]);const p=rows[0];if(!p)throw new HttpError(404,'Product not found');if(p.quantity<line.quantity)throw new HttpError(409,'Insufficient stock');const changed=await c.query('UPDATE products SET quantity=quantity-CAST($1 AS INTEGER) WHERE id=$2 AND shop_id=$3 AND quantity >= CAST($1 AS INTEGER) RETURNING id',[line.quantity,line.productId,a.shop_id]);if(!changed.rows[0])throw new HttpError(409,'Insufficient stock');total+=Number(p.price_minor)*line.quantity;cost+=Number(p.cost_minor)*line.quantity;items.push({product_id:p.id,product_name:p.name,quantity:line.quantity,unit_price_minor:Number(p.price_minor),unit_cost_minor:Number(p.cost_minor)});}
+      for(const line of lines){const {rows}=await c.query('SELECT * FROM products WHERE id=$1 AND shop_id=$2 AND archived=FALSE FOR UPDATE',[line.productId,a.shop_id]);const p=rows[0];if(!p)throw new HttpError(404,'Product not found');if(line.expectedPriceMinor!==undefined&&Number(p.price_minor)!==line.expectedPriceMinor)throw new HttpError(409,'Selling price changed. Review this offline sale with the owner.');if(p.quantity<line.quantity)throw new HttpError(409,'Insufficient stock');const changed=await c.query('UPDATE products SET quantity=quantity-CAST($1 AS INTEGER) WHERE id=$2 AND shop_id=$3 AND quantity >= CAST($1 AS INTEGER) RETURNING id',[line.quantity,line.productId,a.shop_id]);if(!changed.rows[0])throw new HttpError(409,'Insufficient stock');total+=Number(p.price_minor)*line.quantity;cost+=Number(p.cost_minor)*line.quantity;items.push({product_id:p.id,product_name:p.name,quantity:line.quantity,unit_price_minor:Number(p.price_minor),unit_cost_minor:Number(p.cost_minor)});}
       if(!Number.isSafeInteger(total)||!Number.isSafeInteger(cost))throw new HttpError(400,'Sale is too large');
-      const {rows}=await c.query('UPDATE sales SET total_minor=$1,cost_minor=$2 WHERE id=$3 RETURNING *',[total,cost,id]);
+      const {rows}=await c.query('UPDATE sales SET total_minor=$1,cost_minor=$2,recorded_at=$3 WHERE id=$4 RETURNING *',[total,cost,input.recordedAt??null,id]);
       for(const i of items)await c.query('INSERT INTO sale_items(id,sale_id,product_id,product_name,quantity,unit_price_minor,unit_cost_minor) VALUES($1,$2,$3,$4,$5,$6,$7)',[randomUUID(),id,i.product_id,i.product_name,i.quantity,i.unit_price_minor,i.unit_cost_minor]);
       await audit(c,a,'sale.recorded',id);return {sale:rows[0],items,replay:false};
     });

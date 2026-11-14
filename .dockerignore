@@ -10,3 +10,4 @@
 **/.nitro
 upgrade-checkpoints
 build-cache
+**/release*/
