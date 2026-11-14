@@ -117,6 +117,9 @@ export function createOnlineSync(deps: {
     getState: () => state,
     available,
     pending,
+    markOffline() {
+      emit({ connected: false, message: "Offline. Sales saved on this device." });
+    },
     async restore() {
       if (state.ready) return;
       try {
@@ -219,11 +222,11 @@ export function createOnlineSync(deps: {
       }
     },
     async sync() {
-      if (working || mutations || !state.session) return;
       if (deps.online?.() === false) {
         emit({ connected: false, message: "Offline. Sales will be saved on this device." });
         return;
       }
+      if (working || mutations || !state.session) return;
       if (!valid()) {
         emit({
           connected: false,

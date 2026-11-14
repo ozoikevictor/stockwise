@@ -1,4 +1,4 @@
-import { isDesktop } from "@/lib/store";
+import { onlineStore, isDesktop } from "@/lib/store";
 import { createFileRoute, Link, Navigate } from "@tanstack/react-router";
 import { ArrowRight, BarChart3, CalendarDays, PackageCheck, Receipt, TrendingDown, Wallet } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -29,7 +29,7 @@ const features = [
 ];
 
 function Landing() {
-  if (isDesktop()) return <Navigate to="/login" replace />;
+  if (isDesktop()) return <Navigate to={onlineStore.getState().session ? "/online" : "/login"} replace />;
   return (
     <div className="min-h-screen bg-background">
       <header className="bg-hero text-navy-foreground">

@@ -126,6 +126,21 @@ async function fixture() {
   };
 }
 describe("offline sale synchronization", () => {
+  it("updates offline status during an upload and still accepts another saved sale", async () => {
+    const f = await fixture();
+    await f.store.enqueue("p", 2, "Cash");
+    const gate = f.holdSales();
+    const syncing = f.store.sync();
+    await gate.entered;
+    f.setOffline(true);
+    f.store.markOffline();
+    expect(f.store.getState().connected).toBe(false);
+    await f.store.enqueue("p", 1, "Cash");
+    expect(f.store.available()[0]!.quantity).toBe(7);
+    gate.release();
+    await syncing;
+    expect(f.store.pending().length).toBeGreaterThan(0);
+  });
   it("persists before acknowledging, reserves stock and restores after restart", async () => {
     const f = await fixture();
     f.setOffline(true);

@@ -63,6 +63,14 @@ function Online() {
   const [receipt, setReceipt] = useState<
     (OnlineSale & { shopName: string; cashierName: string; timezone: string }) | null
   >(null);
+  useEffect(() => {
+    if (!receipt) return;
+    const saved = synced.cache.queue.find((q) => q.id === receipt.id);
+    if (saved?.state === "confirmed") {
+      setReceipt(null);
+      toast.success("Sale synced. The final receipt is in Sales History.");
+    }
+  }, [synced.cache.queue, receipt]);
   const [switching, setSwitching] = useState(false);
   const [accounts, setAccounts] = useState<{ id: string; name: string; role: string }[]>([]);
   const [switchId, setSwitchId] = useState("");
@@ -96,11 +104,11 @@ function Online() {
     run();
     const timer = setInterval(run, 10000);
     window.addEventListener("online", run);
-    window.addEventListener("offline", run);
+    window.addEventListener("offline", onlineStore.markOffline);
     return () => {
       clearInterval(timer);
       window.removeEventListener("online", run);
-      window.removeEventListener("offline", run);
+      window.removeEventListener("offline", onlineStore.markOffline);
     };
   }, [session, switching, reauth]);
   async function submit(e: FormEvent<HTMLFormElement>, work: (data: FormData) => Promise<void>) {
@@ -139,28 +147,25 @@ function Online() {
   }
   if (!synced.ready)
     return (
-      <AuthLayout title="Loading saved shop" subtitle="Reading pending sales on this device.">
+      <AuthLayout title="Loading saved shop" subtitle="Opening your shop.">
         <p>Please wait…</p>
       </AuthLayout>
     );
   if (!session || reauth)
     return (
       <AuthLayout
-        title={signup ? "Create your online shop" : "Welcome back"}
-        subtitle="Owners and cashiers: sign in with your own online email and password."
+        title={signup ? "Create your shop" : "Welcome back"}
+        subtitle="Sign in to your shop."
       >
         <div className="space-y-5">
           <OnlineConnection />
-          {synced.message && <p role="status">{synced.message}</p>}
+          {!reauth && synced.message && <p role="status">{synced.message}</p>}
           {reauth && (
             <Button type="button" variant="ghost" onClick={() => setReauth(false)}>
               Back to saved shop
             </Button>
           )}
-          <p className="text-sm text-muted-foreground">
-            To switch accounts, enter the other account email and password. Owners create cashier
-            accounts from Staff in the online dashboard.
-          </p>
+
           <form
             className="space-y-4"
             onSubmit={(e) =>
@@ -211,11 +216,11 @@ function Online() {
             </Button>
           </form>
           <Button variant="ghost" onClick={() => setSignup(!signup)}>
-            {signup ? "Already registered? Sign in" : "Create an online owner account"}
+            {signup ? "Already registered? Sign in" : "Create shop"}
           </Button>
           <p>
             <Link to="/login" className="text-sm text-primary">
-              Back to local sign in
+              Local shop
             </Link>
           </p>
         </div>
@@ -231,103 +236,89 @@ function Online() {
       onSwitch={() => void openSwitch()}
       onRefresh={() => void refresh().catch((e) => toast.error(e.message))}
       status={status}
+      connected={synced.connected}
+      syncing={synced.syncing}
+      pendingCount={waiting.length}
     >
-      <section
-        className="space-y-3 rounded-2xl border bg-card p-4"
-        aria-label="Synchronization status"
-      >
-        <div className="flex flex-wrap items-center gap-3">
-          <strong>
-            {synced.syncing
-              ? "Synchronizing…"
-              : synced.connected
-                ? "Online"
-                : "Offline / connection unavailable"}
-          </strong>
-          <span>
-            {waiting.filter((q) => q.state === "waiting").length} waiting ·{" "}
-            {waiting.filter((q) => q.state === "review").length} need review
-          </span>
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={synced.syncing}
-            onClick={() => void onlineStore.sync()}
-          >
-            Sync now
-          </Button>
-          <Button size="sm" variant="ghost" onClick={() => setReauth(true)}>
-            Sign in again
-          </Button>
-        </div>
-        <p className="text-sm">{synced.message}</p>
-        {synced.cache.updatedAt && (
-          <p className="text-xs text-muted-foreground">
-            Last stock update: {new Date(synced.cache.updatedAt).toLocaleString()}. Stock shown
-            reserves this device’s pending sales.
-          </p>
-        )}
-        {waiting.length > 0 && (
-          <details>
-            <summary className="cursor-pointer">Pending sales on this device</summary>
-            <div className="mt-3 space-y-3">
-              {waiting.map((q) => (
-                <article key={q.id} className="space-y-2 rounded-lg border p-3">
-                  <p className="font-medium">
-                    {q.productName} · {q.lines.reduce((n, l) => n + l.quantity, 0)} units ·{" "}
-                    {amount(q.totalMinor)}
-                  </p>
-                  <p className="text-sm">
-                    Saved {new Date(q.savedAt).toLocaleString()} ·{" "}
-                    {q.state === "review" ? "Needs review" : "Waiting for confirmation"}
-                  </p>
-                  <p className="break-all text-xs">Reference: {q.id}</p>
-                  {q.error && <p className="text-sm text-destructive">{q.error}</p>}
-                  {q.state === "review" && (
-                    <>
-                      <p className="text-xs">
-                        Ask the owner to check this sale. Retry after correcting stock on the
-                        server. Cancel only after resolving any goods or payment already exchanged;
-                        cancellation keeps the local record.
-                      </p>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        disabled={synced.syncing}
-                        onClick={() =>
-                          void onlineStore
-                            .review(q.id, "retry")
-                            .then(() => onlineStore.sync())
-                            .catch((e) => toast.error(e.message))
-                        }
-                      >
-                        Retry unchanged sale
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        disabled={synced.syncing}
-                        onClick={() => {
-                          if (
-                            window.confirm(
-                              "Cancel this rejected sale? It will stay in local history. Resolve any goods or payment separately.",
-                            )
-                          )
+      {(waiting.length > 0 ||
+        (!synced.connected && synced.message) ||
+        /sign in|expired|server update|read offline/i.test(synced.message)) && (
+        <section className="space-y-3 rounded-xl border bg-card p-4" aria-label="Sync status">
+          <div className="flex flex-wrap items-center gap-3">
+            <p className="text-sm">
+              {waiting.length
+                ? waiting.length + " sale" + (waiting.length === 1 ? "" : "s") + " waiting to sync"
+                : synced.message}
+            </p>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={synced.syncing}
+              onClick={() => void onlineStore.sync()}
+            >
+              Retry sync
+            </Button>
+            {/sign in|expired/i.test(synced.message) && (
+              <Button size="sm" onClick={() => setReauth(true)}>
+                Sign in
+              </Button>
+            )}
+          </div>
+          {waiting.length > 0 && (
+            <details>
+              <summary className="cursor-pointer text-sm">View pending sales</summary>
+              <div className="mt-3 space-y-3">
+                {waiting.map((q) => (
+                  <article key={q.id} className="space-y-2 rounded-lg border p-3">
+                    <p className="font-medium">
+                      {q.productName} - {amount(q.totalMinor)}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {new Date(q.savedAt).toLocaleString()} -{" "}
+                      {q.state === "review" ? "Needs review" : "Waiting to sync"}
+                    </p>
+                    {q.error && <p className="text-sm text-destructive">{q.error}</p>}
+                    {q.state === "review" && (
+                      <>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={synced.syncing}
+                          onClick={() =>
                             void onlineStore
-                              .review(q.id, "cancel")
-                              .catch((e) => toast.error(e.message));
-                        }}
-                      >
-                        Mark resolved / cancel
-                      </Button>
-                    </>
-                  )}
-                </article>
-              ))}
-            </div>
-          </details>
-        )}
-      </section>
+                              .review(q.id, "retry")
+                              .then(() => onlineStore.sync())
+                              .catch((e) => toast.error(e.message))
+                          }
+                        >
+                          Retry
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          disabled={synced.syncing}
+                          onClick={() => {
+                            if (
+                              window.confirm(
+                                "Mark this rejected sale resolved? Check any goods or payment first. The record will be kept.",
+                              )
+                            )
+                              void onlineStore
+                                .review(q.id, "cancel")
+                                .catch((e) => toast.error(e.message));
+                          }}
+                        >
+                          Mark resolved
+                        </Button>
+                      </>
+                    )}
+                  </article>
+                ))}
+              </div>
+            </details>
+          )}
+        </section>
+      )}
       {switching && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-hero p-6">
           <form
@@ -641,7 +632,7 @@ function Online() {
               <option value="">Choose product</option>
               {products.map((p) => (
                 <option key={p.id} value={p.id} disabled={p.quantity < 1}>
-                  {p.name} - {amount(p.priceMinor)} ({p.quantity} available on this device)
+                  {p.name} - {amount(p.priceMinor)} ({p.quantity} available)
                 </option>
               ))}
             </select>
@@ -663,10 +654,6 @@ function Online() {
               ))}
             </select>
           </Field>
-          <p className="text-xs text-muted-foreground">
-            Saved sales reserve cached stock. The server confirms stock and price when connected.
-            Offline sales may require review.
-          </p>
           <Button disabled={busy}>{busy ? "Saving…" : "Save sale"}</Button>
         </form>
       )}
